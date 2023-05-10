@@ -49,9 +49,11 @@
 #include <linux/oom.h>
 #include <linux/pagevec.h>
 #include <linux/prefetch.h>
-#include <linux/printk.h>
+#include <linux///printk.h>
 #include <linux/dax.h>
 #include <linux/psi.h>
+#include <linux/sched/sysctl.h>
+
 
 #include <asm/tlbflush.h>
 #include <asm/div64.h>
@@ -300,6 +302,7 @@ static inline bool can_reclaim_anon_pages(struct mem_cgroup *memcg,
 					  int node_id,
 					  struct scan_control *sc)
 {
+	////printk(KERN_WARNING "Calling can_reclaim_anon_pages");
 	bool in_cgroup_reclaim = false;
 
 	/* Always age anon pages when we have swap */
@@ -1078,11 +1081,18 @@ static enum page_references page_check_references(struct page *page,
 
 bool migrate_demote_page_ok(struct page *page, struct scan_control *sc)
 {
+	//printk(KERN_WARNING "Calling migrate_demote_page_ok");
 	int next_nid = next_demotion_node(page_to_nid(page));
 
 	VM_BUG_ON_PAGE(!PageLocked(page), page);
 	VM_BUG_ON_PAGE(PageHuge(page), page);
 	VM_BUG_ON_PAGE(PageLRU(page), page);
+
+	//printk(KERN_WARNING "Demote page check on %d",page_to_nid(page));
+	if(page_to_nid(page)==0)
+	{
+		return true;
+	}
 
 	if (!(node_reclaim_mode & RECLAIM_MIGRATE))
 		return false;
@@ -1170,6 +1180,7 @@ static unsigned int demote_page_list(struct list_head *ret_list,
 				     struct pglist_data *pgdat,
 				     struct scan_control *sc)
 {
+	//printk(KERN_WARNING "Calling demote_page_list");
 	int target_nid = next_demotion_node(pgdat->node_id);
 	unsigned int nr_succeeded = 0;
 	int err;
@@ -1177,6 +1188,7 @@ static unsigned int demote_page_list(struct list_head *ret_list,
 	if (list_empty(demote_pages))
 		return 0;
 
+	//printk(KERN_WARNING "List is not empty, Called migrate pages");
 	/* Demotion ignores all cpuset and mempolicy settings */
 	err = migrate_pages(demote_pages, alloc_demote_page, NULL,
 			    target_nid, MIGRATE_ASYNC, MR_DEMOTION,
@@ -1205,6 +1217,7 @@ static unsigned int shrink_page_list(struct list_head *page_list,
 				     struct reclaim_stat *stat,
 				     bool ignore_references)
 {
+	//printk(KERN_WARNING "Calling shrink_page_list");
 	LIST_HEAD(ret_pages);
 	LIST_HEAD(free_pages);
 	LIST_HEAD(demote_pages);
@@ -2058,6 +2071,7 @@ static noinline_for_stack unsigned long
 shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 		     struct scan_control *sc, enum lru_list lru)
 {
+	//printk(KERN_WARNING "Calling shrink_inactive_list");
 	LIST_HEAD(page_list);
 	unsigned long nr_scanned;
 	unsigned int nr_reclaimed = 0;
@@ -2097,8 +2111,8 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 
 	spin_unlock_irq(&pgdat->lru_lock);
 
-	if (nr_taken == 0)
-		return 0;
+if (nr_taken == 0)
+	return 0;
 
 	nr_reclaimed = shrink_page_list(&page_list, pgdat, sc, 0,
 				&stat, false);
@@ -2301,6 +2315,7 @@ unsigned long reclaim_pages(struct list_head *page_list)
 static unsigned long shrink_list(enum lru_list lru, unsigned long nr_to_scan,
 				 struct lruvec *lruvec, struct scan_control *sc)
 {
+	//printk(KERN_WARNING "Calling shrink list");
 	if (is_active_lru(lru)) {
 		if (sc->may_deactivate & (1 << is_file_lru(lru)))
 			shrink_active_list(nr_to_scan, lruvec, sc, lru);
@@ -2565,6 +2580,7 @@ out:
 
 static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 {
+	//printk(KERN_WARNING "Calling shrink_lruvec");
 	unsigned long nr[NR_LRU_LISTS];
 	unsigned long targets[NR_LRU_LISTS];
 	unsigned long nr_to_scan;
@@ -2752,6 +2768,7 @@ static inline bool should_continue_reclaim(struct pglist_data *pgdat,
 
 static void shrink_node_memcgs(pg_data_t *pgdat, struct scan_control *sc)
 {
+	//printk(KERN_WARNING "Calling shrink_node_memcgs");
 	struct mem_cgroup *target_memcg = sc->target_mem_cgroup;
 	struct mem_cgroup *memcg;
 
@@ -2810,6 +2827,7 @@ static void shrink_node_memcgs(pg_data_t *pgdat, struct scan_control *sc)
 
 static void shrink_node(pg_data_t *pgdat, struct scan_control *sc)
 {
+	//printk(KERN_WARNING "Calling shrink_node");
 	struct reclaim_state *reclaim_state = current->reclaim_state;
 	unsigned long nr_reclaimed, nr_scanned;
 	struct lruvec *target_lruvec;
@@ -2892,8 +2910,14 @@ again:
 			struct zone *zone = &pgdat->node_zones[z];
 			if (!managed_zone(zone))
 				continue;
-
+		if (sysctl_numa_balancing_mode && pgdat->node_id==0)
+		{
+			total_high_wmark  = sysctl_numa_balancing_free_pages_threshold;
+		}
+		else
+		{
 			total_high_wmark += high_wmark_pages(zone);
+		}
 		}
 
 		/*
@@ -3313,8 +3337,7 @@ static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
 	 * Check if the pfmemalloc reserves are ok by finding the first node
 	 * with a usable ZONE_NORMAL or lower zone. The expectation is that
 	 * GFP_KERNEL will be required for allocating network buffers when
-	 * swapping over the network so ZONE_HIGHMEM is unusable.
-	 *
+	 * swapping over the network so ZONE_HIGHMEM is unusable.  *
 	 * Throttling is based on the first usable node and throttled processes
 	 * wait on a queue until kswapd makes progress and wakes them. There
 	 * is an affinity then between processes waking up and where reclaim
@@ -3545,21 +3568,56 @@ static bool pgdat_watermark_boosted(pg_data_t *pgdat, int highest_zoneidx)
 	return false;
 }
 
+bool pgdat_toptier_balanced(pg_data_t *pgdat, int order, int zone_idx)
+{
+	//printk(KERN_WARNING "Calling pgdat_toptier_balanced");
+	unsigned long mark;
+	struct zone *zone;
+
+	if (pgdat->node_id!=0 || !sysctl_numa_balancing_mode ||
+		order > 0 || zone_idx < ZONE_NORMAL) {
+		return true;
+	}
+
+	zone = pgdat->node_zones + ZONE_NORMAL;
+
+	if (!managed_zone(zone))
+		return true;
+
+	mark = min(sysctl_numa_balancing_free_pages_threshold, zone_managed_pages(zone));
+
+	if (zone_page_state(zone, NR_FREE_PAGES) < mark)
+		return false;
+
+	return true;
+}
+
+
+
+
+
+
+
 /*
  * Keep the free pages on fast memory node a little more than the high
  * watermark to accommodate the promoted pages.
  */
 #define NUMA_BALANCING_ADDON_WATERMARK		(10UL * 1024 * 1024 >> PAGE_SHIFT)
-
 /*
  * Returns true if there is an eligible zone balanced for the request order
  * and highest_zoneidx
  */
 static bool pgdat_balanced(pg_data_t *pgdat, int order, int highest_zoneidx)
 {
+	//printk(KERN_WARNING "Calling pgdat_balanced");
 	int i;
 	unsigned long mark = -1;
 	struct zone *zone;
+
+	if (sysctl_numa_balancing_mode && pgdat->node_id==0 && highest_zoneidx >= ZONE_NORMAL)
+	{
+		return pgdat_toptier_balanced(pgdat, 0, highest_zoneidx);
+	}
 
 	/*
 	 * Check watermarks bottom-up as lower zones are more likely to
@@ -3572,14 +3630,19 @@ static bool pgdat_balanced(pg_data_t *pgdat, int order, int highest_zoneidx)
 			continue;
 
 		mark = high_wmark_pages(zone);
-		if (sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING &&
+		//printk(KERN_WARNING "Node = %d",pgdat->node_id);
+		//printk(KERN_WARNING "Next demotion node = %d",next_demotion_node(pgdat->node_id));
+		//printk(KERN_WARNING "Numa balancing = %d",sysctl_numa_balancing_mode);
+		if (sysctl_numa_balancing_mode &&
 		    next_demotion_node(pgdat->node_id) != NUMA_NO_NODE) {
 			unsigned long addon_mark;
 
-			addon_mark = min(NUMA_BALANCING_ADDON_WATERMARK,
+			addon_mark = max(sysctl_numa_balancing_free_pages_threshold,
 					 pgdat->node_present_pages >> 6);
+			//printk(KERN_WARNING "Addon Mark = %ld",addon_mark);
 			mark += addon_mark;
 		}
+		//printk(KERN_WARNING "Mark = %ld",mark);
 		if (zone_watermark_ok_safe(zone, order, mark, highest_zoneidx))
 			return true;
 	}
@@ -3614,6 +3677,7 @@ static void clear_pgdat_congested(pg_data_t *pgdat)
 static bool prepare_kswapd_sleep(pg_data_t *pgdat, int order,
 				int highest_zoneidx)
 {
+	//printk(KERN_WARNING "prepare_kswapd_sleep");
 	/*
 	 * The throttled processes are normally woken up in balance_pgdat() as
 	 * soon as allow_direct_reclaim() is true. But there is a potential
@@ -3653,6 +3717,7 @@ static bool prepare_kswapd_sleep(pg_data_t *pgdat, int order,
 static bool kswapd_shrink_node(pg_data_t *pgdat,
 			       struct scan_control *sc)
 {
+	//printk(KERN_WARNING "Calling kswapd_shrink_node");
 	struct zone *zone;
 	int z;
 
@@ -3662,8 +3727,14 @@ static bool kswapd_shrink_node(pg_data_t *pgdat,
 		zone = pgdat->node_zones + z;
 		if (!managed_zone(zone))
 			continue;
-
+	if (sysctl_numa_balancing_mode && pgdat->node_id==0)
+	{
+		sc->nr_to_reclaim = sysctl_numa_balancing_free_pages_threshold;
+	}
+	else
+	{
 		sc->nr_to_reclaim += max(high_wmark_pages(zone), SWAP_CLUSTER_MAX);
+	}
 	}
 
 	/*
@@ -3700,6 +3771,7 @@ static bool kswapd_shrink_node(pg_data_t *pgdat,
  */
 static int balance_pgdat(pg_data_t *pgdat, int order, int highest_zoneidx)
 {
+	//printk(KERN_WARNING "balance_pgdat");
 	int i;
 	unsigned long nr_soft_reclaimed;
 	unsigned long nr_soft_scanned;
@@ -3924,6 +3996,7 @@ static enum zone_type kswapd_highest_zoneidx(pg_data_t *pgdat,
 static void kswapd_try_to_sleep(pg_data_t *pgdat, int alloc_order, int reclaim_order,
 				unsigned int highest_zoneidx)
 {
+	//////printk(KERN_WARNING "kswapd_try_to_sleep");
 	long remaining = 0;
 	DEFINE_WAIT(wait);
 
@@ -4020,6 +4093,7 @@ static void kswapd_try_to_sleep(pg_data_t *pgdat, int alloc_order, int reclaim_o
  */
 static int kswapd(void *p)
 {
+	////printk(KERN_WARNING "kswapd");
 	unsigned int alloc_order, reclaim_order;
 	unsigned int highest_zoneidx = MAX_NR_ZONES - 1;
 	pg_data_t *pgdat = (pg_data_t*)p;
@@ -4056,6 +4130,9 @@ static int kswapd(void *p)
 kswapd_try_sleep:
 		kswapd_try_to_sleep(pgdat, alloc_order, reclaim_order,
 					highest_zoneidx);
+
+
+		//printk(KERN_WARNING "kswapd main fn woken up from sleep");
 
 		/* Read the new order and highest_zoneidx */
 		alloc_order = reclaim_order = READ_ONCE(pgdat->kswapd_order);
@@ -4106,6 +4183,7 @@ kswapd_try_sleep:
 void wakeup_kswapd(struct zone *zone, gfp_t gfp_flags, int order,
 		   enum zone_type highest_zoneidx)
 {
+	//printk(KERN_WARNING "kswapd is worken up now");
 	pg_data_t *pgdat;
 	enum zone_type curr_idx;
 
@@ -4128,21 +4206,6 @@ void wakeup_kswapd(struct zone *zone, gfp_t gfp_flags, int order,
 		return;
 
 	/* Hopeless node, leave it to direct reclaim if possible */
-	if (pgdat->kswapd_failures >= MAX_RECLAIM_RETRIES ||
-	    (pgdat_balanced(pgdat, order, highest_zoneidx) &&
-	     !pgdat_watermark_boosted(pgdat, highest_zoneidx))) {
-		/*
-		 * There may be plenty of free memory available, but it's too
-		 * fragmented for high-order allocations.  Wake up kcompactd
-		 * and rely on compaction_suitable() to determine if it's
-		 * needed.  If it fails, it will defer subsequent attempts to
-		 * ratelimit its work.
-		 */
-		if (!(gfp_flags & __GFP_DIRECT_RECLAIM))
-			wakeup_kcompactd(pgdat, order, highest_zoneidx);
-		return;
-	}
-
 	trace_mm_vmscan_wakeup_kswapd(pgdat->node_id, highest_zoneidx, order,
 				      gfp_flags);
 	wake_up_interruptible(&pgdat->kswapd_wait);

@@ -99,11 +99,15 @@
 #include <linux/mmu_notifier.h>
 #include <linux/printk.h>
 #include <linux/swapops.h>
+#include <linux/sched/sysctl.h>
+
 
 #include <asm/tlbflush.h>
 #include <linux/uaccess.h>
 
 #include "internal.h"
+#include <linux/sched/sysctl.h>
+
 
 /* Internal flags */
 #define MPOL_MF_DISCONTIG_OK (MPOL_MF_INTERNAL << 0)	/* Skip checks for continuous vmas */
@@ -652,6 +656,7 @@ unlock:
 unsigned long change_prot_numa(struct vm_area_struct *vma,
 			unsigned long addr, unsigned long end)
 {
+//	printk(KERN_WARNING "Called change_prot_numa");
 	int nr_updated;
 
 	nr_updated = change_protection(vma, addr, end, PAGE_NONE, MM_CP_PROT_NUMA);
@@ -2467,6 +2472,31 @@ static void sp_free(struct sp_node *n)
 	kmem_cache_free(sn_cache, n);
 }
 
+void check_toptier_balanced(void)
+{
+	//printk(KERN_WARNING "Calling check_toptier_balanced");
+	int nid;
+	int balanced;
+
+	if (!sysctl_numa_balancing_mode)
+		return;
+
+	for_each_node_state(nid, N_MEMORY) {
+		pg_data_t *pgdat = NODE_DATA(nid);
+
+		if (nid!=0)
+			continue;
+
+		balanced = pgdat_toptier_balanced(pgdat, 0, ZONE_MOVABLE);
+		if (!balanced) {
+			pgdat->kswapd_order = 0;
+			pgdat->kswapd_highest_zoneidx = ZONE_NORMAL;
+			//printk(KERN_WARNING "Now waking up kswapd");
+			wakeup_kswapd(pgdat->node_zones + ZONE_NORMAL, 0, 1, ZONE_NORMAL);
+		}
+	}
+}
+
 /**
  * mpol_misplaced - check whether current page node is valid in policy
  *
@@ -2496,8 +2526,10 @@ int mpol_misplaced(struct page *page, struct vm_area_struct *vma, unsigned long 
 	int ret = -1;
 
 	pol = get_vma_policy(vma, addr);
-	if (!(pol->flags & MPOL_F_MOF))
-		goto out;
+
+	//Removed condition to force migration irrespective of policy
+	/*if (!(pol->flags & MPOL_F_MOF))
+		goto out;*/
 
 	switch (pol->mode) {
 	case MPOL_INTERLEAVE:
@@ -2521,8 +2553,8 @@ int mpol_misplaced(struct page *page, struct vm_area_struct *vma, unsigned long 
 		 * else select nearest allowed node, if any.
 		 * If no allowed nodes, use current [!misplaced].
 		 */
-		if (node_isset(curnid, pol->v.nodes))
-			goto out;
+		/*if (node_isset(curnid, pol->v.nodes))
+			goto out;*/
 		z = first_zones_zonelist(
 				node_zonelist(numa_node_id(), GFP_HIGHUSER),
 				gfp_zone(GFP_HIGHUSER),
@@ -2534,20 +2566,30 @@ int mpol_misplaced(struct page *page, struct vm_area_struct *vma, unsigned long 
 		BUG();
 	}
 
+	check_toptier_balanced();
+
+	//Removed condition to force migration irrespective of policy
 	/* Migrate the page towards the node whose CPU is referencing it */
-	if (pol->flags & MPOL_F_MORON) {
-		polnid = thisnid;
+	/*if (pol->flags & MPOL_F_MORON) {
+		polnid = thisnid;*/
 
 		if (!should_numa_migrate_memory(current, page, curnid, thiscpu))
 			goto out;
-	}
+	/*}*/
+	return 0; //if NUMA should migrate memory - value is lower node
 
 	if (curnid != polnid)
 		ret = polnid;
 out:
 	mpol_cond_put(pol);
 
-	return ret;
+	/*if(sysctl_numa_balancing)
+	{
+		return curnid;
+	}*/
+
+	
+	return 16; //if NUMA should not migrate memory - value is remote memory node
 }
 
 /*

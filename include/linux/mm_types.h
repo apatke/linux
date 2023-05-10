@@ -66,6 +66,8 @@ struct mem_cgroup;
 #endif
 
 struct page {
+
+	unsigned int burst;
 	unsigned long flags;		/* Atomic flags, some possibly
 					 * updated asynchronously */
 	/*

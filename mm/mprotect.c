@@ -112,22 +112,32 @@ static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 				 * Don't mess with PTEs if page is already on the node
 				 * a single-threaded process is running on.
 				 */
-				nid = page_to_nid(page);
+
+				/*Significant modifications made here to enable liberal scanning on all nodes.
+				 * May need to reduce in future to minimize transfer overhead.*/
+
+				/*nid = page_to_nid(page);
 				if (target_node == nid)
 					continue;
 				toptier = node_is_toptier(nid);
+				*/
 
 				/*
 				 * Skip scanning top tier node if normal numa
 				 * balancing is disabled
 				 */
-				if (!(sysctl_numa_balancing_mode & NUMA_BALANCING_NORMAL) &&
+
+				/*if (!(sysctl_numa_balancing_mode & NUMA_BALANCING_NORMAL) &&
 				    toptier)
-					continue;
-				if (sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING &&
-				    !toptier)
-					xchg_page_access_time(page,
-						jiffies_to_msecs(jiffies));
+					continue;*/
+
+				if (sysctl_numa_balancing_mode)
+				{
+				   unsigned int last_time, time; 
+       				   time = jiffies_to_msecs(jiffies);
+        			   
+				   last_time = xchg_page_access_time(page, time);
+				}
 			}
 
 			oldpte = ptep_modify_prot_start(vma, addr, pte);

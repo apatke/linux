@@ -4014,6 +4014,7 @@ static int numa_migrate_prep(struct page *page, struct vm_area_struct *vma,
 
 static vm_fault_t do_numa_page(struct vm_fault *vmf)
 {
+	//printk(KERN_WARNING "do numa page");
 	struct vm_area_struct *vma = vmf->vma;
 	struct page *page = NULL;
 	int page_nid = NUMA_NO_NODE;
@@ -4024,6 +4025,7 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
 	bool was_writable = pte_savedwrite(vmf->orig_pte);
 	int flags = 0;
 
+    
 	/*
 	 * The "pte" at this point cannot be used safely without
 	 * validation through pte_unmap_same(). It's of NUMA type but
@@ -4088,9 +4090,19 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
 		last_cpupid = (-1 & LAST_CPUPID_MASK);
 	else
 		last_cpupid = page_cpupid_last(page);
-	target_nid = numa_migrate_prep(page, vma, vmf->address, page_nid,
+	
+    // TPP - logic please remove for PERMIT
+    /*if (!PageActive(page)) {
+               mark_page_accessed(page);
+               pte_unmap_unlock(vmf->pte, vmf->ptl);
+               goto out;
+           }*/
+    
+    target_nid = numa_migrate_prep(page, vma, vmf->address, page_nid,
 			&flags);
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
+
+	//printk(KERN_WARNING "Target nid = %d",target_nid);
 	if (target_nid == NUMA_NO_NODE) {
 		put_page(page);
 		goto out;

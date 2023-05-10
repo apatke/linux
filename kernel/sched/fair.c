@@ -24,6 +24,9 @@
 
 #include <trace/events/sched.h>
 
+
+unsigned int count_pages_moved = 0;
+
 /*
  * Targeted preemption latency for CPU-bound tasks:
  *
@@ -1084,6 +1087,12 @@ unsigned int sysctl_numa_balancing_hot_threshold = 1000;
  */
 unsigned int sysctl_numa_balancing_rate_limit = 65536;
 
+unsigned int sysctl_numa_balancing_free_pages_threshold = 10000;
+
+unsigned int sysctl_numa_balancing_free_pages_threshold_pre = 10000;
+
+unsigned int sysctl_numa_balancing_correction = 0;
+
 struct numa_group {
 	refcount_t refcount;
 
@@ -1424,25 +1433,14 @@ static inline unsigned long group_weight(struct task_struct *p, int nid,
 	return 1000 * faults / total_faults;
 }
 
-static bool pgdat_free_space_enough(struct pglist_data *pgdat)
+
+/* Added check to find number of free pages in the node which is the migration target*/
+static int node_free_space_enough(int nid)
 {
-	int z;
-	unsigned long enough_mark;
-
-	enough_mark = max(1UL * 1024 * 1024 * 1024 >> PAGE_SHIFT,
-			  pgdat->node_present_pages >> 4);
-	for (z = pgdat->nr_zones - 1; z >= 0; z--) {
-		struct zone *zone = pgdat->node_zones + z;
-
-		if (!populated_zone(zone))
-			continue;
-
-		if (zone_watermark_ok(zone, 0,
-				      high_wmark_pages(zone) + enough_mark,
-				      ZONE_MOVABLE, 0))
-			return true;
-	}
-	return false;
+	struct sysinfo i;
+	si_meminfo_node(&i,nid);
+	printk(KERN_WARNING "Total free pages on node = %ld",i.freeram);
+	return i.freeram;
 }
 
 static int numa_hint_fault_latency(struct page *page)
@@ -1452,7 +1450,18 @@ static int numa_hint_fault_latency(struct page *page)
 	time = jiffies_to_msecs(jiffies);
 	last_time = xchg_page_access_time(page, time);
 
-	return (time - last_time) & PAGE_ACCESS_TIME_MASK;
+	int hint_latency = (time-last_time) & PAGE_ACCESS_TIME_MASK;
+	
+	page->burst = 0;
+
+	if(sysctl_numa_balancing_correction)
+	{
+		return page->burst;
+	}
+	else
+	{
+		return hint_latency;
+	}
 }
 
 static bool numa_migration_check_rate_limit(struct pglist_data *pgdat,
@@ -1501,9 +1510,12 @@ static void numa_migration_adjust_threshold(struct pglist_data *pgdat,
 	}
 }
 
+
+/* Several modifications are made to this function to support improved page migration. Check notes for details*/
 bool should_numa_migrate_memory(struct task_struct *p, struct page * page,
 				int src_nid, int dst_cpu)
 {
+	// printk(KERN_WARNING "Should numa migrate memory");
 	struct numa_group *ng = deref_curr_numa_group(p);
 	int dst_nid = cpu_to_node(dst_cpu);
 	int last_cpupid, this_cpupid;
@@ -1512,27 +1524,26 @@ bool should_numa_migrate_memory(struct task_struct *p, struct page * page,
 	 * The pages in slow memory node should be migrated according
 	 * to hot/cold instead of accessing CPU node.
 	 */
-	if (sysctl_numa_balancing_mode & NUMA_BALANCING_MEMORY_TIERING &&
-	    !node_is_toptier(src_nid)) {
+	//printk(KERN_WARNING "Destination node id = %d",dst_nid);
+	if (sysctl_numa_balancing_mode) {
 		struct pglist_data *pgdat;
 		unsigned long rate_limit, latency, th, def_th;
 
 		pgdat = NODE_DATA(dst_nid);
-		if (pgdat_free_space_enough(pgdat))
-			return true;
 
-		def_th = sysctl_numa_balancing_hot_threshold;
-		rate_limit =
-			sysctl_numa_balancing_rate_limit << (20 - PAGE_SHIFT);
-		numa_migration_adjust_threshold(pgdat, rate_limit, def_th);
+		int free_pages = node_free_space_enough(dst_nid);
 
-		th = pgdat->numa_threshold ? : def_th;
+		th = sysctl_numa_balancing_hot_threshold;
+
 		latency = numa_hint_fault_latency(page);
-		if (latency > th)
-			return false;
+		printk(KERN_WARNING "Hint latency = %d, Page Address = %ld",latency,(unsigned long)page_address(page));
+        if(latency < th) 
+        {
+            count_pages_moved +=1;
+        }
 
-		return numa_migration_check_rate_limit(pgdat, rate_limit,
-						       hpage_nr_pages(page));
+		printk(KERN_WARNING "Count pages moved = %d",count_pages_moved);	
+		return (free_pages>sysctl_numa_balancing_free_pages_threshold_pre & latency < th);
 	}
 
 	this_cpupid = cpu_pid_to_cpupid(dst_cpu, current->pid);
@@ -2836,6 +2847,7 @@ static void reset_ptenuma_scan(struct task_struct *p)
  */
 static void task_numa_work(struct callback_head *work)
 {
+	//printk(KERN_WARNING "Caling task_numa_work");
 	unsigned long migrate, next_scan, now = jiffies;
 	struct task_struct *p = current;
 	struct mm_struct *mm = p->mm;
@@ -2903,10 +2915,29 @@ static void task_numa_work(struct callback_head *work)
 		vma = mm->mmap;
 	}
 	for (; vma; vma = vma->vm_next) {
-		if (!vma_migratable(vma) || !vma_policy_mof(vma) ||
+
+		//printk(KERN_WARNING "Step 1");
+
+		//printk(KERN_WARNING "!vma_migratable(vma) =  %d",!vma_migratable(vma));
+
+		//printk(KERN_WARNING "!vma_policy_mof(vma) = %d",!vma_policy_mof(vma));
+
+		//printk(KERN_WARNING "is_vm_hugetlb_page(vma) = %d",is_vm_hugetlb_page(vma));
+
+		//printk(KERN_WARNING "vma-vm_flags & VM_MIXEDMAP =  %d",(vma->vm_flags & VM_MIXEDMAP));
+
+		
+		//Ignore policy for NUMA migration
+		/*if (!vma_migratable(vma) || !vma_policy_mof(vma) ||
 			is_vm_hugetlb_page(vma) || (vma->vm_flags & VM_MIXEDMAP)) {
 			continue;
-		}
+		}*/
+		
+		//Ignore policy for NUMA migration
+		/*if (!vma_migratable(vma) ||
+			is_vm_hugetlb_page(vma) || (vma->vm_flags & VM_MIXEDMAP)) {
+			continue;
+		}*/
 
 		/*
 		 * Shared library pages mapped by multiple processes are not
@@ -2914,21 +2945,25 @@ static void task_numa_work(struct callback_head *work)
 		 * hinting faults in read-only file-backed mappings or the vdso
 		 * as migrating the pages will be of marginal benefit.
 		 */
-		if (!vma->vm_mm ||
+		//printk(KERN_WARNING "Step 2");
+		/*if (!vma->vm_mm ||
 		    (vma->vm_file && (vma->vm_flags & (VM_READ|VM_WRITE)) == (VM_READ)))
-			continue;
+			continue;*/
 
 		/*
 		 * Skip inaccessible VMAs to avoid any confusion between
 		 * PROT_NONE and NUMA hinting ptes
 		 */
+		//printk(KERN_WARNING "Step 3");
 		if (!vma_is_accessible(vma))
 			continue;
 
+		//printk(KERN_WARNING "Step 4");
 		do {
 			start = max(start, vma->vm_start);
 			end = ALIGN(start + (pages << PAGE_SHIFT), HPAGE_SIZE);
 			end = min(end, vma->vm_end);
+			//printk(KERN_WARNING "change_prot_numa called");
 			nr_pte_updates = change_prot_numa(vma, start, end);
 
 			/*

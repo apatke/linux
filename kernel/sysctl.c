@@ -1763,6 +1763,28 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= proc_dointvec,
 	},
 	{
+		.procname	= "numa_balancing_free_pages_threshold",
+		.data		= &sysctl_numa_balancing_free_pages_threshold,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "numa_balancing_free_pages_threshold_pre",
+		.data		= &sysctl_numa_balancing_free_pages_threshold_pre,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+
+	{
+		.procname	= "numa_balancing_correction",
+		.data		= &sysctl_numa_balancing_correction,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
 		.procname	= "numa_balancing_rate_limit_mbps",
 		.data		= &sysctl_numa_balancing_rate_limit,
 		.maxlen		= sizeof(unsigned int),

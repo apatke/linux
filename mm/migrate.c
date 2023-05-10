@@ -1178,7 +1178,7 @@ out:
  * Writes to this array occur without locking.  READ_ONCE()
  * is recommended for readers to ensure consistent reads.
  */
-static int node_demotion[MAX_NUMNODES] = {[0 ...  MAX_NUMNODES - 1] = NUMA_NO_NODE};
+static int node_demotion[MAX_NUMNODES] = {[0 ...  MAX_NUMNODES - 1] = 16};
 
 /**
  * next_demotion_node() - Get the next node in the demotion path
@@ -1197,7 +1197,14 @@ int next_demotion_node(int node)
 	 * reading multiple, inconsistent 'node' values
 	 * during an update.
 	 */
-	return READ_ONCE(node_demotion[node]);
+	if(node==0)
+	{
+		return 16;
+	}
+	else
+	{
+		return READ_ONCE(node_demotion[node]);
+	}
 }
 
 /*
@@ -1232,7 +1239,8 @@ static int unmap_and_move(new_page_t get_new_page,
 	newpage = get_new_page(page, private);
 	if (!newpage)
 		return -ENOMEM;
-
+	
+	//printk(KERN_WARNING "New page paased");
 	rc = __unmap_and_move(page, newpage, force, mode);
 	if (rc == MIGRATEPAGE_SUCCESS)
 		set_page_owner_migrate_reason(newpage, reason);
@@ -1261,6 +1269,7 @@ out:
 	 * isolation. Otherwise, restore the page to right list unless
 	 * we want to retry.
 	 */
+	//printk(KERN_WARNING "Return code for unmap_and_move = %d",rc);
 	if (rc == MIGRATEPAGE_SUCCESS) {
 		put_page(page);
 		if (reason == MR_MEMORY_FAILURE) {
@@ -1458,6 +1467,7 @@ int migrate_pages(struct list_head *from, new_page_t get_new_page,
 		free_page_t put_new_page, unsigned long private,
 		enum migrate_mode mode, int reason, unsigned int *nr_succeeded)
 {
+	//printk(KERN_WARNING "migrate_pages = %ld",private);
 	int retry = 1;
 	int nr_failed = 0;
 	int pass = 0;
@@ -1967,6 +1977,7 @@ static struct page *alloc_misplaced_dst_page(struct page *page,
 
 static int numamigrate_isolate_page(pg_data_t *pgdat, struct page *page)
 {
+	//printk(KERN_WARNING "Calling numamigrate_isolate_page");
 	int page_lru, nr = compound_nr(page), order = compound_order(page);
 
 	VM_BUG_ON_PAGE(order && !PageTransHuge(page), page);
@@ -2040,6 +2051,7 @@ bool pmd_trans_migrating(pmd_t pmd)
 int migrate_misplaced_page(struct page *page, struct vm_area_struct *vma,
 			   int node)
 {
+	//printk(KERN_WARNING "migrate_misplaced_pages");
 	pg_data_t *pgdat = NODE_DATA(node);
 	int isolated;
 	int nr_remaining;
@@ -3081,6 +3093,11 @@ static int establish_migrate_target(int node, nodemask_t *used)
 		return NUMA_NO_NODE;
 
 	migration_target = find_next_best_node(node, used);
+
+	if(node==0)
+	{
+		migration_target = 16;
+	}
 	if (migration_target == NUMA_NO_NODE)
 		return NUMA_NO_NODE;
 
